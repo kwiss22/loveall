@@ -1,9 +1,12 @@
 [phases.setup]
-nixPkgs = ["python311"]
+nixPkgs = ["python311", "pip"]
 
 [phases.install]
-cmds = ["pip install -r requirements.txt"]
+cmds = [
+    "pip install --upgrade pip",
+    "pip install -r requirements.txt"
+]
 
 [start]
-cmd = "gunicorn -w 2 -b 0.0.0.0:$PORT web_vocab_app:app"
+cmd = "gunicorn --bind 0.0.0.0:$PORT --workers 2 --threads 2 --timeout 120 web_vocab_app:app"
 
