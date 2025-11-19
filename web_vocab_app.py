@@ -1,0 +1,450 @@
+"""
+영어 단어장 웹 애플리케이션 (Flask)
+기존 vocab_book.py의 모든 기능을 웹 버전으로 구현
+
+주요 기능:
+- 단어 추가/수정/삭제/검색
+- 영어 ↔ 한글 퀴즈
+- 퀴즈 통계 및 시각화
+- 다크 모드 지원
+"""
+
+from flask import Flask, render_template, request, jsonify
+import json
+import random
+import os
+import logging
+from typing import Dict, List, Tuple, Optional
+
+# Flask 앱 초기화
+app = Flask(__name__)
+
+# 로깅 설정
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# 상수 정의
+VOCAB_FILE = "vocabulary.json"
+STATS_FILE = "quiz_stats.json"
+DEFAULT_PORT = 5000
+FALLBACK_PORT = 5001
+
+# 전역 변수
+vocabulary: Dict[str, str] = {}
+quiz_stats: Dict[str, List[int]] = {}  # {word: [correct_count, wrong_count]}
+
+def load_data() -> None:
+    """
+    파일에서 단어장 및 통계 데이터 불러오기
+    
+    Returns:
+        None
+    """
+    global vocabulary, quiz_stats
+    vocabulary = {}
+    quiz_stats = {}
+    
+    # 단어장 데이터 로드
+    try:
+        if os.path.exists(VOCAB_FILE):
+            with open(VOCAB_FILE, 'r', encoding='utf-8') as f:
+                vocabulary = json.load(f)
+            logger.info(f"단어장 불러오기 성공: {len(vocabulary)}개 단어")
+        else:
+            logger.info("단어장 파일이 없습니다. 새로 생성합니다.")
+    except json.JSONDecodeError as e:
+        logger.error(f"단어장 JSON 파싱 오류: {e}")
+        vocabulary = {}
+    except Exception as e:
+        logger.error(f"단어장 불러오기 실패: {e}")
+        vocabulary = {}
+    
+    # 통계 데이터 로드
+    try:
+        if os.path.exists(STATS_FILE):
+            with open(STATS_FILE, 'r', encoding='utf-8') as f:
+                quiz_stats = json.load(f)
+            logger.info(f"통계 불러오기 성공: {len(quiz_stats)}개 기록")
+        else:
+            logger.info("통계 파일이 없습니다. 새로 생성합니다.")
+    except json.JSONDecodeError as e:
+        logger.error(f"통계 JSON 파싱 오류: {e}")
+        quiz_stats = {}
+    except Exception as e:
+        logger.error(f"통계 불러오기 실패: {e}")
+        quiz_stats = {}
+
+def save_data() -> bool:
+    """
+    단어장 및 통계 데이터를 파일에 저장
+    
+    Returns:
+        bool: 저장 성공 여부
+    """
+    try:
+        # 단어장 저장
+        with open(VOCAB_FILE, 'w', encoding='utf-8') as f:
+            json.dump(vocabulary, f, ensure_ascii=False, indent=2)
+        
+        # 통계 저장
+        with open(STATS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(quiz_stats, f, ensure_ascii=False, indent=2)
+        
+        logger.debug("데이터 저장 성공")
+        return True
+    except IOError as e:
+        logger.error(f"파일 저장 IO 오류: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"파일 저장 실패: {e}")
+        return False
+
+# 메인 페이지
+@app.route('/')
+def index():
+    """메인 페이지"""
+    return render_template('index.html', 
+                         word_count=len(vocabulary),
+                         stats_count=len(quiz_stats))
+
+# 단어 목록 API
+@app.route('/api/words', methods=['GET'])
+def get_words():
+    """모든 단어 가져오기"""
+    words_list = [{"english": eng, "korean": kor} 
+                  for eng, kor in vocabulary.items()]
+    return jsonify(words_list)
+
+def validate_word_input(english: str, korean: str) -> Tuple[bool, Optional[str]]:
+    """
+    단어 입력값 검증
+    
+    Args:
+        english: 영어 단어
+        korean: 한국어 뜻
+        
+    Returns:
+        Tuple[bool, Optional[str]]: (검증 성공 여부, 에러 메시지)
+    """
+    if not english or not english.strip():
+        return False, "영어 단어를 입력해주세요."
+    if not korean or not korean.strip():
+        return False, "한국어 뜻을 입력해주세요."
+    if len(english) > 100:
+        return False, "영어 단어는 100자 이하여야 합니다."
+    if len(korean) > 200:
+        return False, "한국어 뜻은 200자 이하여야 합니다."
+    return True, None
+
+@app.route('/api/words', methods=['POST'])
+def add_word():
+    """
+    단어 추가 API
+    
+    Request Body:
+        {
+            "english": "단어",
+            "korean": "뜻"
+        }
+        
+    Returns:
+        JSON: 성공/실패 메시지
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "message": "요청 데이터가 없습니다."}), 400
+        
+        english = data.get('english', '').strip().lower()
+        korean = data.get('korean', '').strip()
+        
+        # 입력 검증
+        is_valid, error_message = validate_word_input(english, korean)
+        if not is_valid:
+            return jsonify({"success": False, "message": error_message}), 400
+        
+        # 중복 확인
+        if english in vocabulary:
+            return jsonify({"success": False, "message": f"'{english}' 단어가 이미 존재합니다."}), 409
+        
+        # 단어 추가
+        vocabulary[english] = korean
+        if save_data():
+            logger.info(f"단어 추가 성공: {english}")
+            return jsonify({"success": True, "message": f"'{english}' 단어가 추가되었습니다!"})
+        else:
+            return jsonify({"success": False, "message": "파일 저장에 실패했습니다."}), 500
+            
+    except Exception as e:
+        logger.error(f"단어 추가 오류: {e}")
+        return jsonify({"success": False, "message": "서버 오류가 발생했습니다."}), 500
+
+@app.route('/api/words/<word>', methods=['DELETE'])
+def delete_word(word: str):
+    """
+    단어 삭제 API
+    
+    Args:
+        word: 삭제할 영어 단어
+        
+    Returns:
+        JSON: 성공/실패 메시지
+    """
+    try:
+        word = word.lower().strip()
+        
+        if not word:
+            return jsonify({"success": False, "message": "단어를 입력해주세요."}), 400
+        
+        if word not in vocabulary:
+            return jsonify({"success": False, "message": "단어를 찾을 수 없습니다."}), 404
+        
+        # 단어 삭제
+        del vocabulary[word]
+        
+        # 통계도 함께 삭제
+        if word in quiz_stats:
+            del quiz_stats[word]
+        
+        if save_data():
+            logger.info(f"단어 삭제 성공: {word}")
+            return jsonify({"success": True, "message": f"'{word}' 단어가 삭제되었습니다!"})
+        else:
+            return jsonify({"success": False, "message": "파일 저장에 실패했습니다."}), 500
+            
+    except Exception as e:
+        logger.error(f"단어 삭제 오류: {e}")
+        return jsonify({"success": False, "message": "서버 오류가 발생했습니다."}), 500
+
+@app.route('/api/words/<word>', methods=['PUT'])
+def update_word(word: str):
+    """
+    단어 수정 API
+    
+    Args:
+        word: 수정할 영어 단어
+        
+    Request Body:
+        {
+            "english": "새 단어",
+            "korean": "새 뜻"
+        }
+        
+    Returns:
+        JSON: 성공/실패 메시지
+    """
+    try:
+        word = word.lower().strip()
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({"success": False, "message": "요청 데이터가 없습니다."}), 400
+        
+        new_english = data.get('english', '').strip().lower()
+        new_korean = data.get('korean', '').strip()
+        
+        # 입력 검증
+        is_valid, error_message = validate_word_input(new_english, new_korean)
+        if not is_valid:
+            return jsonify({"success": False, "message": error_message}), 400
+        
+        if word not in vocabulary:
+            return jsonify({"success": False, "message": "단어를 찾을 수 없습니다."}), 404
+        
+        # 단어가 변경된 경우
+        if new_english != word:
+            # 새 단어가 이미 존재하는지 확인
+            if new_english in vocabulary and new_english != word:
+                return jsonify({"success": False, "message": f"'{new_english}' 단어가 이미 존재합니다."}), 409
+            
+            # 기존 단어 삭제
+            del vocabulary[word]
+            
+            # 통계 이전
+            if word in quiz_stats:
+                quiz_stats[new_english] = quiz_stats.pop(word)
+            
+            # 새 단어 추가
+            vocabulary[new_english] = new_korean
+        else:
+            # 단어는 같고 뜻만 변경
+            vocabulary[word] = new_korean
+        
+        if save_data():
+            logger.info(f"단어 수정 성공: {word} -> {new_english}")
+            return jsonify({"success": True, "message": f"단어가 수정되었습니다!"})
+        else:
+            return jsonify({"success": False, "message": "파일 저장에 실패했습니다."}), 500
+            
+    except Exception as e:
+        logger.error(f"단어 수정 오류: {e}")
+        return jsonify({"success": False, "message": "서버 오류가 발생했습니다."}), 500
+
+# 단어 검색 API
+@app.route('/api/words/<word>', methods=['GET'])
+def search_word(word):
+    """단어 검색"""
+    word = word.lower()
+    if word in vocabulary:
+        return jsonify({"success": True, "english": word, "korean": vocabulary[word]})
+    else:
+        return jsonify({"success": False, "message": "단어를 찾을 수 없습니다."}), 404
+
+# 퀴즈 문제 가져오기 API
+@app.route('/api/quiz', methods=['POST'])
+def get_quiz():
+    """퀴즈 문제 생성"""
+    data = request.get_json()
+    quiz_type = data.get('type', 'english_to_korean')  # 'english_to_korean' or 'korean_to_english'
+    
+    if not vocabulary:
+        return jsonify({"success": False, "message": "퀴즈를 하려면 먼저 단어를 추가해주세요."}), 400
+    
+    # 랜덤으로 단어 선택
+    words = list(vocabulary.keys())
+    word = random.choice(words)
+    
+    if quiz_type == 'english_to_korean':
+        return jsonify({
+            "success": True,
+            "type": "english_to_korean",
+            "word": word,
+            "question": f"'{word}'의 한국어 뜻은?",
+            "correct_answer": vocabulary[word]
+        })
+    else:  # korean_to_english
+        return jsonify({
+            "success": True,
+            "type": "korean_to_english",
+            "word": word,
+            "question": f"'{vocabulary[word]}'의 영어 단어는?",
+            "correct_answer": word
+        })
+
+@app.route('/api/quiz/check', methods=['POST'])
+def check_quiz():
+    """
+    퀴즈 정답 확인 API
+    
+    Request Body:
+        {
+            "word": "단어",
+            "answer": "사용자 답",
+            "type": "english_to_korean" or "korean_to_english"
+        }
+        
+    Returns:
+        JSON: 정답 여부 및 통계
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "message": "요청 데이터가 없습니다."}), 400
+        
+        word = data.get('word', '').lower().strip()
+        user_answer = data.get('answer', '').strip()
+        quiz_type = data.get('type', 'english_to_korean')
+        
+        if not word:
+            return jsonify({"success": False, "message": "단어를 입력해주세요."}), 400
+        if not user_answer:
+            return jsonify({"success": False, "message": "답을 입력해주세요."}), 400
+        
+        if word not in vocabulary:
+            return jsonify({"success": False, "message": "단어를 찾을 수 없습니다."}), 404
+        
+        # 정답 확인
+        if quiz_type == 'english_to_korean':
+            correct_answer = vocabulary[word]
+            is_correct = user_answer == correct_answer
+        else:  # korean_to_english
+            correct_answer = word
+            is_correct = user_answer.lower().strip() == correct_answer.lower()
+        
+        # 통계 초기화 (없는 경우)
+        if word not in quiz_stats:
+            quiz_stats[word] = [0, 0]
+        
+        # 통계 업데이트
+        if is_correct:
+            quiz_stats[word][0] += 1  # 맞춘 횟수
+            logger.debug(f"퀴즈 정답: {word}")
+        else:
+            quiz_stats[word][1] += 1  # 틀린 횟수
+            logger.debug(f"퀴즈 오답: {word}")
+        
+        save_data()
+        
+        return jsonify({
+            "success": True,
+            "is_correct": is_correct,
+            "correct_answer": correct_answer,
+            "stats": quiz_stats[word]
+        })
+        
+    except Exception as e:
+        logger.error(f"퀴즈 정답 확인 오류: {e}")
+        return jsonify({"success": False, "message": "서버 오류가 발생했습니다."}), 500
+
+# 통계 API
+@app.route('/api/stats', methods=['GET'])
+def get_stats():
+    """퀴즈 통계 가져오기"""
+    stats_list = []
+    
+    for word, stats in quiz_stats.items():
+        correct, wrong = stats
+        total = correct + wrong
+        accuracy = (correct / total * 100) if total > 0 else 0
+        
+        stats_list.append({
+            "word": word,
+            "korean": vocabulary.get(word, "?"),
+            "correct": correct,
+            "wrong": wrong,
+            "total": total,
+            "accuracy": round(accuracy, 1)
+        })
+    
+    # 정답률 순으로 정렬
+    stats_list.sort(key=lambda x: x['accuracy'], reverse=True)
+    
+    return jsonify(stats_list)
+
+def start_server(port: int = DEFAULT_PORT) -> None:
+    """
+    Flask 서버 시작
+    
+    Args:
+        port: 서버 포트 번호
+    """
+    logger.info("="*60)
+    logger.info("영어 단어장 웹 애플리케이션 시작!")
+    logger.info("="*60)
+    logger.info(f"단어 개수: {len(vocabulary)}개")
+    logger.info(f"통계 기록: {len(quiz_stats)}개")
+    logger.info(f"접속 주소: http://127.0.0.1:{port}")
+    logger.info("="*60)
+    
+    app.run(debug=True, host='127.0.0.1', port=port, use_reloader=False)
+
+if __name__ == '__main__':
+    # 프로그램 시작 시 데이터 로드
+    load_data()
+    
+    try:
+        start_server(DEFAULT_PORT)
+    except OSError as e:
+        if "Address already in use" in str(e):
+            logger.warning(f"포트 {DEFAULT_PORT}이 사용 중입니다. {FALLBACK_PORT} 포트로 시도합니다.")
+            start_server(FALLBACK_PORT)
+        else:
+            logger.error(f"서버 시작 실패: {e}")
+            raise
+    except Exception as e:
+        logger.error(f"서버 시작 실패: {e}")
+        raise
+

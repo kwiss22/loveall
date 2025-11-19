@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>영어 단어장 - 웹 버전</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <button id="dark-mode-toggle" class="dark-mode-toggle" onclick="toggleDarkMode()">🌙 다크 모드</button>
+            <h1>📖 영어 단어장</h1>
+            <p class="subtitle">총 <span id="word-count">{{ word_count }}</span>개의 단어가 저장되어 있습니다.</p>
+        </header>
+
+        <nav class="tabs">
+            <button class="tab-btn active" onclick="showTab('words', this)">단어 목록</button>
+            <button class="tab-btn" onclick="showTab('add', this)">단어 추가</button>
+            <button class="tab-btn" onclick="showTab('quiz', this)">퀴즈</button>
+            <button class="tab-btn" onclick="showTab('stats', this)">통계</button>
+        </nav>
+
+        <!-- 단어 목록 탭 -->
+        <div id="words-tab" class="tab-content active">
+            <div class="section-header">
+                <h2>단어 목록</h2>
+                <button class="btn-refresh" onclick="loadWords()">새로고침</button>
+            </div>
+            <div class="search-box">
+                <input type="text" id="search-input" class="search-input" placeholder="단어 검색 (영어 또는 한글)" onkeyup="searchWords()">
+                <button class="btn-search" onclick="searchWords()">🔍 검색</button>
+            </div>
+            <div id="words-list" class="words-list">
+                <p class="loading">로딩 중...</p>
+            </div>
+        </div>
+
+        <!-- 단어 추가 탭 -->
+        <div id="add-tab" class="tab-content">
+            <div class="section-header">
+                <h2>단어 추가</h2>
+            </div>
+            <form id="add-word-form" class="add-form">
+                <div class="form-group">
+                    <label for="english-input">영어 단어:</label>
+                    <input type="text" id="english-input" placeholder="예: apple" required>
+                </div>
+                <div class="form-group">
+                    <label for="korean-input">한국어 뜻:</label>
+                    <input type="text" id="korean-input" placeholder="예: 사과" required>
+                </div>
+                <button type="submit" class="btn-primary">추가하기</button>
+            </form>
+            <div id="add-message" class="message"></div>
+        </div>
+
+        <!-- 퀴즈 탭 -->
+        <div id="quiz-tab" class="tab-content">
+            <div class="section-header">
+                <h2>퀴즈</h2>
+                <div class="quiz-controls">
+                    <select id="quiz-type" class="quiz-select">
+                        <option value="english_to_korean">영어 → 한글</option>
+                        <option value="korean_to_english">한글 → 영어</option>
+                    </select>
+                    <button class="btn-primary" onclick="startQuiz()">문제 시작</button>
+                </div>
+            </div>
+            <div id="quiz-area" class="quiz-area">
+                <p class="info-message">위의 '문제 시작' 버튼을 클릭하여 퀴즈를 시작하세요!</p>
+            </div>
+            <div id="quiz-result" class="quiz-result"></div>
+        </div>
+
+        <!-- 통계 탭 -->
+        <div id="stats-tab" class="tab-content">
+            <div class="section-header">
+                <h2>퀴즈 통계</h2>
+                <button class="btn-refresh" onclick="loadStats()">새로고침</button>
+            </div>
+            
+            <!-- 차트 영역 -->
+            <div class="charts-container">
+                <div class="chart-wrapper">
+                    <h3>정답률 상위 10개 단어</h3>
+                    <canvas id="accuracy-chart"></canvas>
+                </div>
+                <div class="chart-wrapper">
+                    <h3>전체 통계 요약</h3>
+                    <canvas id="summary-chart"></canvas>
+                </div>
+            </div>
+            
+            <!-- 통계 목록 -->
+            <div id="stats-list" class="stats-list">
+                <p class="loading">로딩 중...</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
+
